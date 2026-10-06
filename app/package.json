@@ -17,6 +17,7 @@
       "main.js",
       "preload.js",
       "index.html",
+      "rules.json",
       "package.json",
       "node_modules/**/*"
     ],

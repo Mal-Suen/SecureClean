@@ -156,6 +156,41 @@ function normName(s) {
   return String(s).toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]/g, '');
 }
 
+// ============ 规则库(winget-pkgs 编译的软件名称字典, 仅标注不豁免) ============
+let rulesApps = null;
+function loadRules() {
+  if (rulesApps !== null) return;
+  try {
+    const rulesPath = path.join(__dirname, 'rules.json');
+    if (fs.existsSync(rulesPath)) {
+      const data = JSON.parse(fs.readFileSync(rulesPath, 'utf8'));
+      rulesApps = data.apps || [];
+    } else {
+      rulesApps = [];
+    }
+  } catch (e) { rulesApps = []; }
+}
+
+// 标注匹配: 目录名与规则库软件名/厂商名归一化匹配, 返回可读软件名(仅标注, 不影响是否报告)
+// 策略: 精确匹配, 或前缀匹配且较短方 >= 6 字符(防止 black/drive 这类短名误标)
+function matchRuleLabel(dirName) {
+  loadRules();
+  const nameN = normName(dirName);
+  if (nameN.length < 3) return null;
+  for (const a of rulesApps) {
+    if (a.nameN === nameN || a.publisherN === nameN) {
+      return a.name;
+    }
+  }
+  for (const a of rulesApps) {
+    const shorter = Math.min(a.nameN.length, nameN);
+    if (shorter >= 6 && (a.nameN.indexOf(nameN) === 0 || nameN.indexOf(a.nameN) === 0)) {
+      return a.name;
+    }
+  }
+  return null;
+}
+
 // AppData 系统白名单(Windows 组件/开发缓存/厂商父目录)
 const APPDATA_WHITELIST = new Set([
   // Windows 系统/组件
@@ -230,9 +265,11 @@ function scanAppDataOrphans(procPaths, displayNames, referenced) {
       // 大小门槛: 只报 >= 10MB(小目录噪音多)
       const size = getDirSizeMB(full);
       if (size >= 10) {
+        const label = matchRuleLabel(name);
         group.children.push({
           name: name + ' (' + root.label + ')', path: full, sizeMB: size, risk: '中',
-          canDelete: true, note: 'AppData 中无引用且 90 天未更新的数据目录, 疑似已卸载软件残留(删除前请确认)'
+          canDelete: true,
+          note: 'AppData 中无引用且 90 天未更新的数据目录, 疑似已卸载软件残留' + (label ? ': ' + label : '') + ' (删除前请确认)'
         });
       }
     }
@@ -295,9 +332,11 @@ function residueScan() {
         if (!isRef) {
           const size = getDirSizeMB(full);
           if (size > 0) {
+            const label = matchRuleLabel(name);
             orphanGroup.children.push({
               name: name, path: full, sizeMB: size, risk: '中',
-              canDelete: true, note: '无注册表/PATH 引用, 疑似残留(删除前请确认)'
+              canDelete: true,
+              note: '无注册表/PATH 引用, 疑似残留' + (label ? ', 可能属于: ' + label : '') + ' (删除前请确认)'
             });
           }
         }
