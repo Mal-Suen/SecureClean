@@ -253,6 +253,11 @@
 
     <!-- 风险报告 -->
     <div class="tab-pane" id="pane-report">
+      <div class="actions" id="reportActions" style="display:none">
+        <button class="btn btn-primary" id="exportHtmlBtn">导出 HTML 报告</button>
+        <button class="btn btn-primary" id="exportJsonBtn">导出 JSON</button>
+        <div class="status-area"><div class="status" id="reportStatus"></div></div>
+      </div>
       <div class="report-body" id="reportBody">
         <div class="empty-hint">请先在"隐私体检"和"残留检测"中完成扫描, 再查看汇总报告</div>
       </div>
@@ -263,7 +268,7 @@
 </div>
 
 <script>
-  const { privacyScan, residueScan, wipe, openPath } = window.secureclean;
+  const { privacyScan, residueScan, wipe, openPath, exportReport } = window.secureclean;
   const $ = (id) => document.getElementById(id);
 
   let privacyGroups = null;
@@ -404,7 +409,8 @@
     residueGroups = result.groups;
     renderGroups(residueGroups, 'r-tbody');
     const s = leafStats(residueGroups);
-    const orphanCount = residueGroups.length > 0 ? residueGroups[0].children.length : 0;
+    const orphanGroup = residueGroups.find(g => g.category.indexOf('孤儿目录') >= 0);
+    const orphanCount = orphanGroup ? orphanGroup.children.length : 0;
     $('r-statOrphan').textContent = orphanCount;
     $('r-statTotal').textContent = s.count;
     $('r-statSize').textContent = s.totalSize + ' MB';
@@ -461,15 +467,7 @@
   $('r-wipeBtn').addEventListener('click', () => doWipe('r-tbody', 'r-scanBtn', 'r-wipeBtn', 'r-status', 'r-progress', () => $('r-scanBtn').click()));
 
   // ===== 风险报告(B: 汇总) =====
-  function renderReport() {
-    const body = $('reportBody');
-    if (!privacyGroups && !residueGroups) {
-      body.innerHTML = '<div class="empty-hint">请先在"隐私体检"和"残留检测"中完成扫描, 再查看汇总报告</div>';
-      return;
-    }
-    let html = '<h2>隐私风险报告</h2><div class="sub">生成时间: ' + new Date().toLocaleString() + '</div>';
-
-    // 评分
+  function calcReport() {
     let score = 100;
     let pHigh = 0, pCount = 0, pSize = 0;
     let rOrphan = 0, rCount = 0, rSize = 0;
@@ -481,10 +479,26 @@
     if (residueGroups) {
       const s = leafStats(residueGroups);
       rCount = s.count; rSize = s.totalSize;
-      rOrphan = residueGroups.length > 0 ? residueGroups[0].children.length : 0;
+      const og = residueGroups.find(g => g.category.indexOf('孤儿目录') >= 0);
+      rOrphan = og ? og.children.length : 0;
       score -= rOrphan * 4;
     }
     if (score < 0) score = 0;
+    return { score, pHigh, pCount, pSize, rOrphan, rCount, rSize };
+  }
+
+  function renderReport() {
+    const body = $('reportBody');
+    if (!privacyGroups && !residueGroups) {
+      $('reportActions').style.display = 'none';
+      body.innerHTML = '<div class="empty-hint">请先在"隐私体检"和"残留检测"中完成扫描, 再查看汇总报告</div>';
+      return;
+    }
+    $('reportActions').style.display = 'flex';
+    let html = '<h2>隐私风险报告</h2><div class="sub">生成时间: ' + new Date().toLocaleString() + '</div>';
+
+    const r = calcReport();
+    const score = r.score;
     const level = score >= 70 ? 'good' : (score >= 40 ? 'mid' : 'bad');
     const levelText = score >= 70 ? '风险较低' : (score >= 40 ? '风险中等' : '风险较高');
     const advice = score >= 70
@@ -497,15 +511,15 @@
 
     if (privacyGroups) {
       html += '<div class="report-section"><h3>隐私泄露面</h3>' +
-        '<div class="report-line"><span>高风险项(密码/凭证/聊天记录)</span><span class="val" style="color:#e74c3c">' + pHigh + '</span></div>' +
-        '<div class="report-line"><span>泄露面项目总数</span><span class="val">' + pCount + '</span></div>' +
-        '<div class="report-line"><span>涉及数据量</span><span class="val">' + pSize + ' MB</span></div></div>';
+        '<div class="report-line"><span>高风险项(密码/凭证/聊天记录)</span><span class="val" style="color:#e74c3c">' + r.pHigh + '</span></div>' +
+        '<div class="report-line"><span>泄露面项目总数</span><span class="val">' + r.pCount + '</span></div>' +
+        '<div class="report-line"><span>涉及数据量</span><span class="val">' + r.pSize + ' MB</span></div></div>';
     }
     if (residueGroups) {
       html += '<div class="report-section"><h3>搬家/卸载残留</h3>' +
-        '<div class="report-line"><span>孤儿目录(无注册表引用)</span><span class="val" style="color:#e74c3c">' + rOrphan + '</span></div>' +
-        '<div class="report-line"><span>残留项目总数</span><span class="val">' + rCount + '</span></div>' +
-        '<div class="report-line"><span>可释放空间</span><span class="val">' + rSize + ' MB</span></div></div>';
+        '<div class="report-line"><span>孤儿目录(无注册表引用)</span><span class="val" style="color:#e74c3c">' + r.rOrphan + '</span></div>' +
+        '<div class="report-line"><span>残留项目总数</span><span class="val">' + r.rCount + '</span></div>' +
+        '<div class="report-line"><span>可释放空间</span><span class="val">' + r.rSize + ' MB</span></div></div>';
     }
     html += '<div class="report-section"><h3>建议</h3><div class="score-desc">' +
       '1. 换机/卖机前: 清除浏览器密码/Cookie、聊天记录、SSH 密钥<br>' +
@@ -514,6 +528,91 @@
 
     body.innerHTML = html;
   }
+
+  // ===== 报告导出 =====
+  function buildReportHtml() {
+    const r = calcReport();
+    const now = new Date().toLocaleString();
+    const levelText = r.score >= 70 ? '风险较低' : (r.score >= 40 ? '风险中等' : '风险较高');
+    const levelColor = r.score >= 70 ? '#28b464' : (r.score >= 40 ? '#c8a014' : '#e74c3c');
+
+    function detailTable(gs) {
+      if (!gs) return '';
+      let t = '<table><tr><th>名称</th><th>路径</th><th>大小(MB)</th><th>风险</th><th>说明</th></tr>';
+      for (const g of gs) {
+        t += '<tr class="grp"><td colspan="5">' + esc(g.category) + ' (' + g.children.length + ' 项)</td></tr>';
+        for (const c of g.children) {
+          t += '<tr><td>' + esc(c.name) + '</td><td>' + esc(c.path) + '</td><td>' + c.sizeMB + '</td><td>' + esc(c.risk) + '</td><td>' + esc(c.note) + '</td></tr>';
+        }
+      }
+      t += '</table>';
+      return t;
+    }
+
+    return '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>SecureClean 隐私风险报告</title><style>' +
+      'body{font-family:"Segoe UI","Microsoft YaHei",sans-serif;max-width:960px;margin:30px auto;color:#1d1d1f;background:#fff;padding:0 20px}' +
+      'h1{font-size:24px}h2{font-size:17px;margin:26px 0 10px}.sub{color:#7a7a7a;font-size:12px;margin-bottom:18px}' +
+      '.score{display:flex;gap:18px;align-items:center;padding:18px;border:1px solid #e0e0e0;border-radius:8px;margin-bottom:8px}' +
+      '.score .num{font-size:42px;font-weight:700;color:' + levelColor + '}' +
+      'table{width:100%;border-collapse:collapse;font-size:12px;margin:8px 0 20px}' +
+      'th{background:#fafafc;text-align:left;padding:8px;border-bottom:2px solid #e0e0e0;color:#7a7a7a}' +
+      'td{padding:7px 8px;border-bottom:1px solid #f0f0f0;word-break:break-all}' +
+      'tr.grp td{background:#fafafc;font-weight:600}' +
+      '.foot{color:#7a7a7a;font-size:11px;margin-top:24px;border-top:1px solid #f0f0f0;padding-top:10px}' +
+      '</style></head><body>' +
+      '<h1>SecureClean 隐私风险报告</h1><div class="sub">生成时间: ' + now + ' | 工具: SecureClean v1.0.0 | GPL-3.0</div>' +
+      '<div class="score"><div class="num">' + r.score + '</div><div><b>' + levelText + '</b><br>评分 0-100, 越低风险越高</div></div>' +
+      '<h2>隐私泄露面</h2>' + (privacyGroups
+        ? '<p>高风险 ' + r.pHigh + ' 项, 共 ' + r.pCount + ' 项, ' + r.pSize + ' MB</p>' + detailTable(privacyGroups)
+        : '<p>(未扫描)</p>') +
+      '<h2>搬家/卸载残留</h2>' + (residueGroups
+        ? '<p>孤儿目录 ' + r.rOrphan + ' 个, 共 ' + r.rCount + ' 项, 可释放 ' + r.rSize + ' MB</p>' + detailTable(residueGroups)
+        : '<p>(未扫描)</p>') +
+      '<h2>建议</h2><ol>' +
+      '<li>换机/卖机前: 清除浏览器密码/Cookie、聊天记录、SSH 密钥</li>' +
+      '<li>清除时使用"安全清除"(覆盖写入), 普通删除可被恢复</li>' +
+      '<li>孤儿目录确认无用后清除, 可释放磁盘空间</li></ol>' +
+      '<div class="foot">本报告由 SecureClean 生成, 仅记录检测到的数据位置, 不含数据内容。安全清除 = 覆盖写入后删除。</div>' +
+      '</body></html>';
+  }
+
+  function buildReportJson() {
+    const r = calcReport();
+    return JSON.stringify({
+      tool: 'SecureClean',
+      version: '1.0.0',
+      timestamp: new Date().toISOString(),
+      score: r.score,
+      privacy: privacyGroups ? {
+        highRisk: r.pHigh, totalItems: r.pCount, totalSizeMB: r.pSize,
+        groups: privacyGroups
+      } : null,
+      residue: residueGroups ? {
+        orphanDirs: r.rOrphan, totalItems: r.rCount, totalSizeMB: r.rSize,
+        groups: residueGroups
+      } : null
+    }, null, 2);
+  }
+
+  async function doExport(format) {
+    if (!privacyGroups && !residueGroups) {
+      alert('请先完成扫描再导出');
+      return;
+    }
+    $('reportStatus').textContent = '正在导出...';
+    const content = format === 'json' ? buildReportJson() : buildReportHtml();
+    const result = await exportReport({ format: format, content: content });
+    if (result.ok) {
+      $('reportStatus').textContent = '已导出: ' + result.path;
+    } else if (result.msg !== '已取消') {
+      $('reportStatus').textContent = '导出失败: ' + result.msg;
+    } else {
+      $('reportStatus').textContent = '';
+    }
+  }
+
+  $('exportHtmlBtn').addEventListener('click', () => doExport('html'));
+  $('exportJsonBtn').addEventListener('click', () => doExport('json'));
 
   function esc(s) {
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');

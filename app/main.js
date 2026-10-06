@@ -91,12 +91,16 @@ function collectUninstallEntries() {
       const t = line.trim();
       if (t.startsWith('HKEY_')) {
         if (current && current.displayName) entries.push(current);
-        current = { key: t, displayName: '', location: '' };
+        current = { key: t, displayName: '', location: '', displayIcon: '', uninstallString: '' };
       } else if (current && t.includes('REG_SZ')) {
         if (t.startsWith('DisplayName')) {
           current.displayName = t.replace(/^DisplayName\s+REG_SZ\s*/, '').trim();
         } else if (t.startsWith('InstallLocation')) {
           current.location = t.replace(/^InstallLocation\s+REG_SZ\s*/, '').trim();
+        } else if (t.startsWith('DisplayIcon')) {
+          current.displayIcon = t.replace(/^DisplayIcon\s+REG_SZ\s*/, '').trim();
+        } else if (t.startsWith('UninstallString')) {
+          current.uninstallString = t.replace(/^UninstallString\s+REG_SZ\s*/, '').trim();
         }
       }
     }
@@ -150,6 +154,90 @@ function getProcessPaths() {
 // 名称归一化(去非字母数字中文, 小写), 用于目录名与卸载项 DisplayName 匹配
 function normName(s) {
   return String(s).toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]/g, '');
+}
+
+// AppData 系统白名单(Windows 组件/开发缓存/厂商父目录)
+const APPDATA_WHITELIST = new Set([
+  // Windows 系统/组件
+  'Microsoft', 'Packages', 'Programs', 'Temp', 'CrashDumps', 'D3DSCache', 'comms',
+  'ConnectedDevicesPlatform', 'PeerDistRepub', 'Publishers', 'VirtualStore',
+  'PlaceholderTileLogoFolder', 'SquirrelTemp', 'Internet Explorer', 'Windows',
+  'Microsoft Windows', 'IsolatedStorage', 'assembly',
+  // 开发工具缓存/配置(非软件本体)
+  'npm-cache', 'pip', 'pypa', 'conda', 'conda-anaconda-tos', 'Docker', 'go-build',
+  'goimports', 'node-gyp', 'uv', 'cache', 'NuGet', 'Package Cache', 'ms-playwright',
+  'main.kts.compiled.cache', 'sqlmap', 'ffuf', 'nuclei', 'GitHubDesktop',
+  // 厂商父目录(组件分散安装)
+  'Google', 'Mozilla', 'Adobe', 'JetBrains', 'Kingsoft', 'Tencent', 'NetEase',
+  'NVIDIA', 'NVIDIA Corporation', 'Intel', 'VMware', 'Battle.net', 'CEF',
+  'ChromeExtensionCache', 'Npcap', 'Bytedance', 'Thunder Network', 'Topaz Labs LLC'
+]);
+
+// AppData 孤儿目录检测: 已卸载软件的数据残留
+// 关键豁免: 活跃度(在用软件的 AppData 持续写入缓存/日志, 90 天内有修改视为在用)
+function getLatestMtime(dir, depth) {
+  let latest = 0;
+  try {
+    const st = fs.statSync(dir);
+    latest = st.mtimeMs;
+    if (depth > 0) {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (e.isDirectory()) {
+          const sub = getLatestMtime(path.join(dir, e.name), depth - 1);
+          if (sub > latest) latest = sub;
+        }
+      }
+    }
+  } catch (err) { }
+  return latest;
+}
+
+const APPDATA_ACTIVE_MS = 90 * 24 * 3600 * 1000; // 90 天
+
+function scanAppDataOrphans(procPaths, displayNames, referenced) {
+  const group = { category: 'AppData 孤儿目录(疑似已卸载软件数据残留)', children: [] };
+  const userHome = os.homedir();
+  const appDataRoots = [
+    { label: 'Local', p: path.join(userHome, 'AppData', 'Local') },
+    { label: 'Roaming', p: path.join(userHome, 'AppData', 'Roaming') }
+  ];
+  const whitelistLc = new Set(Array.from(APPDATA_WHITELIST).map(n => n.toLowerCase()));
+  for (const root of appDataRoots) {
+    let names;
+    try { names = fs.readdirSync(root.p); } catch (e) { continue; }
+    for (const name of names) {
+      // 点开头目录(.xxx 开发配置惯例)豁免
+      if (name.startsWith('.')) continue;
+      if (whitelistLc.has(name.toLowerCase())) continue;
+      const full = path.join(root.p, name);
+      try {
+        if (!fs.statSync(full).isDirectory()) continue;
+      } catch (e) { continue; }
+      const fullLc = full.toLowerCase();
+      // 运行中进程豁免
+      if (procPaths.some(pp => pp.startsWith(fullLc + '\\'))) continue;
+      // 活跃度豁免: 90 天内有修改(两层深度)视为在用
+      if (Date.now() - getLatestMtime(full, 2) < APPDATA_ACTIVE_MS) continue;
+      // 名称匹配豁免(双向: 目录名含软件名 或 软件名含目录名)
+      const nameN = normName(name);
+      if (nameN.length >= 4 && displayNames.some(dn => dn === nameN || dn.includes(nameN) || nameN.includes(dn))) continue;
+      // 注册表引用豁免
+      let isRef = false;
+      for (const ref of referenced) {
+        if (ref === fullLc || ref.startsWith(fullLc + '\\') || fullLc.startsWith(ref + '\\')) { isRef = true; break; }
+      }
+      if (isRef) continue;
+      // 大小门槛: 只报 >= 10MB(小目录噪音多)
+      const size = getDirSizeMB(full);
+      if (size >= 10) {
+        group.children.push({
+          name: name + ' (' + root.label + ')', path: full, sizeMB: size, risk: '中',
+          canDelete: true, note: 'AppData 中无引用且 90 天未更新的数据目录, 疑似已卸载软件残留(删除前请确认)'
+        });
+      }
+    }
+  }
+  return group;
 }
 
 function residueScan() {
@@ -245,6 +333,10 @@ function residueScan() {
   }
   if (pathGroup.children.length > 0) groups.push(pathGroup);
 
+  // ===== 4. AppData 孤儿目录(已卸载软件数据残留) =====
+  const appDataGroup = scanAppDataOrphans(procPaths, displayNames, referenced);
+  if (appDataGroup) groups.push(appDataGroup);
+
   return { groups, uninstallCount: uninstallEntries.length };
 }
 
@@ -254,25 +346,38 @@ function privacyScan() {
   const sysDrive = process.env.SystemDrive || 'C:';
   const groups = [];
 
-  // ===== 浏览器泄露面 =====
+  // ===== 浏览器泄露面(多 profile: Default + Profile 1/2/...) =====
   const browserGroup = { category: '浏览器(密码/登录态可被提取)', children: [] };
   const browsers = [
     { name: 'Chrome', data: path.join(userHome, 'AppData', 'Local', 'Google', 'Chrome', 'User Data') },
     { name: 'Edge', data: path.join(userHome, 'AppData', 'Local', 'Microsoft', 'Edge', 'User Data') }
   ];
+  // 枚举浏览器 profile 目录
+  function listProfiles(userDataPath) {
+    const profiles = [];
+    try {
+      for (const name of fs.readdirSync(userDataPath)) {
+        if (name === 'Default' || /^Profile \d+$/.test(name)) {
+          profiles.push({ label: name === 'Default' ? '' : ' ' + name, p: path.join(userDataPath, name) });
+        }
+      }
+    } catch (e) { }
+    return profiles;
+  }
   for (const b of browsers) {
-    const def = path.join(b.data, 'Default');
-    const subs = [
-      { name: b.name + ' 保存的密码', p: path.join(def, 'Login Data'), risk: '高', canDelete: true, note: '登录密码数据库(可被提取)' },
-      { name: b.name + ' 登录态 Cookie', p: path.join(def, 'Cookies'), risk: '高', canDelete: true, note: '会话 Cookie(可被用于免密登录)' },
-      { name: b.name + ' 浏览历史', p: path.join(def, 'History'), risk: '中', canDelete: true, note: '浏览记录' },
-      { name: b.name + ' 自动填充', p: path.join(def, 'Web Data'), risk: '高', canDelete: true, note: '表单/地址/银行卡自动填充' },
-      { name: b.name + ' 本地存储', p: path.join(def, 'Local Storage'), risk: '中', canDelete: true, note: '网站本地数据' }
-    ];
-    for (const s of subs) {
-      const size = getSizeMB(s.p);
-      if (size > 0) {
-        browserGroup.children.push({ name: s.name, path: s.p, sizeMB: size, risk: s.risk, canDelete: s.canDelete, note: s.note });
+    for (const prof of listProfiles(b.data)) {
+      const subs = [
+        { name: b.name + prof.label + ' 保存的密码', p: path.join(prof.p, 'Login Data'), risk: '高', canDelete: true, note: '登录密码数据库(可被提取)' },
+        { name: b.name + prof.label + ' 登录态 Cookie', p: path.join(prof.p, 'Cookies'), risk: '高', canDelete: true, note: '会话 Cookie(可被用于免密登录)' },
+        { name: b.name + prof.label + ' 浏览历史', p: path.join(prof.p, 'History'), risk: '中', canDelete: true, note: '浏览记录' },
+        { name: b.name + prof.label + ' 自动填充', p: path.join(prof.p, 'Web Data'), risk: '高', canDelete: true, note: '表单/地址/银行卡自动填充' },
+        { name: b.name + prof.label + ' 本地存储', p: path.join(prof.p, 'Local Storage'), risk: '中', canDelete: true, note: '网站本地数据' }
+      ];
+      for (const s of subs) {
+        const size = getSizeMB(s.p);
+        if (size > 0) {
+          browserGroup.children.push({ name: s.name, path: s.p, sizeMB: size, risk: s.risk, canDelete: s.canDelete, note: s.note });
+        }
       }
     }
   }
@@ -330,12 +435,16 @@ function privacyScan() {
 
   // ===== 可恢复数据 =====
   const recoverGroup = { category: '可恢复数据(删除后仍可被还原)', children: [] };
-  const recycle = getDirSizeMB(path.join(sysDrive, '$Recycle.Bin'));
-  if (recycle > 0) {
-    recoverGroup.children.push({
-      name: '回收站', path: path.join(sysDrive, '$Recycle.Bin'), sizeMB: recycle,
-      risk: '高', canDelete: true, note: '已删除但可恢复的文件(普通删除可被还原)'
-    });
+  // 回收站(所有盘)
+  for (const drive of getDrives()) {
+    const rb = path.join(drive, '$Recycle.Bin');
+    const size = getDirSizeMB(rb);
+    if (size > 0) {
+      recoverGroup.children.push({
+        name: '回收站(' + drive + ')', path: rb, sizeMB: size,
+        risk: '高', canDelete: true, note: '已删除但可恢复的文件(普通删除可被还原)'
+      });
+    }
   }
   const recent = getDirSizeMB(path.join(userHome, 'AppData', 'Roaming', 'Microsoft', 'Windows', 'Recent'));
   if (recent > 0) {
@@ -442,12 +551,29 @@ function deleteAllCredentials() {
 }
 
 // ============ IPC ============
+// 扫描结果缓存: wipe 只允许清除最近扫描结果中出现过的目标(白名单校验)
+let lastScanTargets = new Set();
+
+function registerScanTargets(groups) {
+  for (const g of groups) {
+    for (const c of g.children) {
+      if (c.canDelete) {
+        lastScanTargets.add((c.actionType || 'dir') + '|' + c.path);
+      }
+    }
+  }
+}
+
 ipcMain.handle('privacy-scan', () => {
-  return privacyScan();
+  const groups = privacyScan();
+  registerScanTargets(groups);
+  return groups;
 });
 
 ipcMain.handle('residue-scan', () => {
-  return residueScan();
+  const result = residueScan();
+  registerScanTargets(result.groups);
+  return result;
 });
 
 // 点击路径打开: 目录直接打开, 文件打开所在目录并选中
@@ -469,12 +595,40 @@ ipcMain.handle('open-path', (event, p) => {
   }
 });
 
-// 安全清除: 按类型分发
+// 报告导出: 保存对话框 + 写文件
+ipcMain.handle('export-report', async (event, data) => {
+  const { dialog } = require('electron');
+  const isJson = data.format === 'json';
+  const ext = isJson ? 'json' : 'html';
+  const defaultName = 'SecureClean-Report-' + new Date().toISOString().slice(0, 10) + '.' + ext;
+  const result = await dialog.showSaveDialog(win, {
+    title: '导出报告',
+    defaultPath: defaultName,
+    filters: [{ name: isJson ? 'JSON 报告' : 'HTML 报告', extensions: [ext] }]
+  });
+  if (result.canceled || !result.filePath) {
+    return { ok: false, msg: '已取消' };
+  }
+  try {
+    fs.writeFileSync(result.filePath, data.content, 'utf8');
+    return { ok: true, path: result.filePath };
+  } catch (e) {
+    return { ok: false, msg: e.message };
+  }
+});
+
+// 安全清除: 按类型分发, 白名单校验(只允许清除扫描结果中出现过的目标)
 // items: [{ type: 'dir'|'registry'|'path-env'|'credential', target: '...' }]
 ipcMain.handle('wipe', (event, items) => {
   let success = 0, fail = 0;
   const errors = [];
   for (const item of items) {
+    // 白名单校验: 目标必须在最近扫描结果中
+    if (!lastScanTargets.has((item.type || 'dir') + '|' + item.target)) {
+      fail++;
+      errors.push(item.target + ': 拒绝执行(目标不在扫描结果中, 请重新扫描)');
+      continue;
+    }
     try {
       if (item.type === 'registry') {
         execSync('reg delete "' + item.target + '" /f', { windowsHide: true, timeout: 15000 });
