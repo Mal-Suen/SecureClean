@@ -317,6 +317,8 @@ function residueScan() {
         const fullLc = full.toLowerCase();
         // 运行中进程豁免(目录下有进程 exe 在跑 → 在用)
         if (procPaths.some(pp => pp.startsWith(fullLc + '\\'))) continue;
+        // 活跃度豁免(90 天内有修改视为在用, 覆盖"程序+数据分离"目录如剪映草稿)
+        if (Date.now() - getLatestMtime(full, 2) < APPDATA_ACTIVE_MS) continue;
         // DisplayName 匹配豁免(目录名与卸载项软件名归一化后相等/包含)
         const nameN = normName(name);
         if (nameN.length >= 4 && displayNames.some(dn => dn === nameN || dn.includes(nameN))) continue;
