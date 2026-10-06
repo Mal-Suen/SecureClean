@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>SecureClean</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "SF Pro Text", "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: #f5f5f7;
+    color: #1d1d1f;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+    overflow: hidden;
+  }
+  .container { padding: 24px 32px 18px; height: 100vh; display: flex; flex-direction: column; }
+
+  /* 标题 */
+  .header { display: flex; align-items: baseline; gap: 16px; margin-bottom: 14px; }
+  .header h1 { font-size: 24px; font-weight: 700; letter-spacing: -0.4px; color: #1d1d1f; }
+  .header p { font-size: 12px; color: #7a7a7a; }
+
+  /* Tab */
+  .tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid #e0e0e0; }
+  .tab {
+    padding: 8px 18px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #7a7a7a;
+    cursor: pointer;
+    border: none;
+    background: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    font-family: inherit;
+    transition: color 0.15s;
+  }
+  .tab:hover { color: #1d1d1f; }
+  .tab.active { color: #0066cc; border-bottom-color: #0066cc; }
+
+  .tab-content { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .tab-pane { display: none; flex: 1; flex-direction: column; min-height: 0; }
+  .tab-pane.active { display: flex; }
+
+  /* 统计卡片 */
+  .stats { display: flex; gap: 14px; margin-bottom: 14px; }
+  .card {
+    background: #fff;
+    border-radius: 8px;
+    padding: 12px 0;
+    width: 170px;
+    text-align: center;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+  }
+  .card .label { font-size: 11px; color: #7a7a7a; }
+  .card .value { font-size: 22px; font-weight: 700; margin-top: 3px; }
+  .card .value.red { color: #e74c3c; }
+  .card .value.blue { color: #0066cc; }
+  .card .value.green { color: #28b464; }
+
+  /* 操作区 */
+  .actions { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .btn {
+    border: none;
+    border-radius: 8px;
+    padding: 0 24px;
+    height: 38px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #fff;
+    cursor: pointer;
+    transition: background 0.15s ease, transform 0.1s ease;
+    font-family: inherit;
+  }
+  .btn:active { transform: scale(0.97); }
+  .btn-primary { background: #0066cc; }
+  .btn-primary:hover:not(:disabled) { background: #0071e3; }
+  .btn-danger { background: #e74c3c; }
+  .btn-danger:hover:not(:disabled) { background: #ec5f50; }
+  .btn:disabled { background: #c8c8cd; cursor: not-allowed; }
+
+  .status-area { flex: 1; min-width: 0; }
+  .status { font-size: 12px; color: #7a7a7a; }
+  .progress-track {
+    height: 4px;
+    background: #e6e6eb;
+    border-radius: 2px;
+    margin-top: 7px;
+    overflow: hidden;
+  }
+  .progress-bar {
+    height: 100%;
+    background: #0066cc;
+    border-radius: 2px;
+    width: 0%;
+    transition: width 0.3s ease;
+  }
+
+  /* 表格 */
+  .table-wrap {
+    flex: 1;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+    overflow: auto;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th {
+    position: sticky; top: 0;
+    background: #fff;
+    color: #7a7a7a;
+    font-weight: 600;
+    text-align: left;
+    padding: 11px 14px;
+    border-bottom: 1px solid #f0f0f0;
+    font-size: 12px;
+  }
+  tbody td {
+    padding: 9px 14px;
+    border-bottom: 1px solid #f5f5f5;
+    color: #1d1d1f;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 320px;
+  }
+  tbody tr:nth-child(even) { background: #fafafc; }
+  tbody tr:hover { background: #f0f5ff; }
+  tbody tr:last-child td { border-bottom: none; }
+  .risk-high { color: #e74c3c; font-weight: 600; }
+  .risk-mid { color: #c8a014; font-weight: 600; }
+  .risk-low { color: #28b464; font-weight: 600; }
+  .checkbox-cell { text-align: center; width: 52px; }
+  input[type="checkbox"] { width: 15px; height: 15px; cursor: pointer; accent-color: #0066cc; }
+  input[type="checkbox"]:disabled { cursor: not-allowed; opacity: 0.35; }
+
+  /* 分组折叠 */
+  .group-row { cursor: pointer; background: #fafafc !important; }
+  .group-row:hover { background: #f0f5ff !important; }
+  .group-row td { font-weight: 600; color: #1d1d1f; border-bottom: 1px solid #e8e8ed; }
+  .arrow {
+    display: inline-block;
+    transition: transform 0.18s ease;
+    color: #7a7a7a;
+    font-size: 10px;
+    margin-right: 8px;
+  }
+  .group-row.expanded .arrow { transform: rotate(90deg); }
+  .group-meta { font-weight: 400; font-size: 11px; color: #7a7a7a; margin-left: 10px; }
+  .child-row td { color: #48484a; }
+  .child-row .checkbox-cell { padding-left: 52px; }
+  .child-row .sub-name { padding-left: 36px; }
+  .child-row.hidden { display: none; }
+  .path-link { color: #0066cc; cursor: pointer; }
+  .path-link:hover { text-decoration: underline; }
+
+  /* 风险报告 */
+  .report-body {
+    flex: 1;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+    padding: 28px 32px;
+    overflow: auto;
+  }
+  .report-body h2 { font-size: 18px; margin-bottom: 6px; }
+  .report-body .sub { color: #7a7a7a; font-size: 12px; margin-bottom: 20px; }
+  .report-section { margin-bottom: 22px; }
+  .report-section h3 { font-size: 14px; margin-bottom: 8px; color: #1d1d1f; }
+  .report-line { display: flex; justify-content: space-between; font-size: 13px; padding: 7px 0; border-bottom: 1px solid #f5f5f5; }
+  .report-line .val { font-weight: 600; }
+  .score-box {
+    display: flex; align-items: center; gap: 18px;
+    padding: 18px; border-radius: 8px; margin-bottom: 22px;
+  }
+  .score-box.bad { background: #fdf0ef; }
+  .score-box.mid { background: #fdf7e8; }
+  .score-box.good { background: #eef9f2; }
+  .score-num { font-size: 40px; font-weight: 700; }
+  .score-box.bad .score-num { color: #e74c3c; }
+  .score-box.mid .score-num { color: #c8a014; }
+  .score-box.good .score-num { color: #28b464; }
+  .score-desc { font-size: 13px; color: #48484a; line-height: 1.6; }
+  .empty-hint { color: #7a7a7a; font-size: 13px; padding: 40px; text-align: center; }
+
+  /* 底部 */
+  .footer { font-size: 11px; color: #7a7a7a; margin-top: 10px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <h1>SecureClean</h1>
+    <p>敏感数据残留检测与隐私泄露面体检</p>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="privacy">隐私体检</button>
+    <button class="tab" data-tab="residue">残留检测</button>
+    <button class="tab" data-tab="report">风险报告</button>
+  </div>
+
+  <div class="tab-content">
+    <!-- 隐私体检 -->
+    <div class="tab-pane active" id="pane-privacy">
+      <div class="stats">
+        <div class="card"><div class="label">高风险项</div><div class="value red" id="p-statHigh">-</div></div>
+        <div class="card"><div class="label">泄露面项目</div><div class="value blue" id="p-statTotal">-</div></div>
+        <div class="card"><div class="label">涉及数据量</div><div class="value green" id="p-statSize">-</div></div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-primary" id="p-scanBtn">开始体检</button>
+        <button class="btn btn-danger" id="p-wipeBtn" disabled>安全清除</button>
+        <div class="status-area">
+          <div class="status" id="p-status">检测换机/卖机场景下, 这台电脑会泄露哪些隐私</div>
+          <div class="progress-track"><div class="progress-bar" id="p-progress"></div></div>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th class="checkbox-cell">清除</th><th>名称</th><th>路径</th><th>大小(MB)</th><th>风险</th><th>说明</th>
+          </tr></thead>
+          <tbody id="p-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 残留检测 -->
+    <div class="tab-pane" id="pane-residue">
+      <div class="stats">
+        <div class="card"><div class="label">孤儿目录</div><div class="value red" id="r-statOrphan">-</div></div>
+        <div class="card"><div class="label">残留项目</div><div class="value blue" id="r-statTotal">-</div></div>
+        <div class="card"><div class="label">可释放空间</div><div class="value green" id="r-statSize">-</div></div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-primary" id="r-scanBtn">开始检测</button>
+        <button class="btn btn-danger" id="r-wipeBtn" disabled>安全清除</button>
+        <div class="status-area">
+          <div class="status" id="r-status">检测软件搬家/卸载后留下的孤儿数据(杀毒软件不覆盖此场景)</div>
+          <div class="progress-track"><div class="progress-bar" id="r-progress"></div></div>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th class="checkbox-cell">清除</th><th>名称</th><th>路径</th><th>大小(MB)</th><th>风险</th><th>说明</th>
+          </tr></thead>
+          <tbody id="r-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 风险报告 -->
+    <div class="tab-pane" id="pane-report">
+      <div class="report-body" id="reportBody">
+        <div class="empty-hint">请先在"隐私体检"和"残留检测"中完成扫描, 再查看汇总报告</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">安全清除 = 覆盖写入后删除, 防止数据恢复。聊天记录删除前请确认已备份。</div>
+</div>
+
+<script>
+  const { privacyScan, residueScan, wipe, openPath } = window.secureclean;
+  const $ = (id) => document.getElementById(id);
+
+  let privacyGroups = null;
+  let residueGroups = null;
+
+  // ===== 路径点击: 打开目录(文件则打开所在目录) =====
+  document.addEventListener('click', async (e) => {
+    const link = e.target.closest('.path-link');
+    if (!link) return;
+    e.stopPropagation();
+    const r = await openPath(link.dataset.path);
+    if (!r.ok) alert('无法打开: ' + r.msg);
+  });
+
+  // ===== Tab 切换 =====
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+      tab.classList.add('active');
+      $('pane-' + tab.dataset.tab).classList.add('active');
+      if (tab.dataset.tab === 'report') renderReport();
+    });
+  });
+
+  // ===== 通用: 渲染分组表格 =====
+  function renderGroups(gs, tbodyId) {
+    const tbody = $(tbodyId);
+    tbody.innerHTML = '';
+    for (const g of gs) {
+      let total = 0;
+      for (const c of g.children) total += c.sizeMB;
+      total = Math.round(total * 10) / 10;
+
+      const hasDeletable = g.children.some(c => c.canDelete);
+      const checkHtml = hasDeletable ? '<input type="checkbox" class="group-check">' : '';
+      const tr = document.createElement('tr');
+      tr.className = 'group-row';
+      tr.innerHTML =
+        '<td class="checkbox-cell">' + checkHtml + '</td>' +
+        '<td colspan="5"><span class="arrow">&#9654;</span>' + esc(g.category) +
+        '<span class="group-meta">' + g.children.length + ' 项 · ' + total + ' MB</span></td>';
+      tbody.appendChild(tr);
+
+      const childRows = [];
+      for (const c of g.children) {
+        const riskClass = c.risk === '高' ? 'risk-high' : (c.risk === '中' ? 'risk-mid' : 'risk-low');
+        const actionType = c.actionType || 'dir';
+        // 目录/文件类型: 路径可点击打开; 其他类型(注册表/PATH/凭据)显示普通文本
+        const pathCell = actionType === 'dir'
+          ? '<td class="path-link" data-path="' + esc(c.path) + '" title="点击打开: ' + esc(c.path) + '">' + esc(c.path) + '</td>'
+          : '<td title="' + esc(c.path) + '">' + esc(c.path) + '</td>';
+        const ctr = document.createElement('tr');
+        ctr.className = 'child-row hidden';
+        ctr.innerHTML =
+          '<td class="checkbox-cell"><input type="checkbox" class="child-check" data-path="' + esc(c.path) + '" data-type="' + actionType + '" data-can="' + c.canDelete + '"' + (c.canDelete ? '' : ' disabled') + '></td>' +
+          '<td class="sub-name">' + esc(c.name) + '</td>' +
+          pathCell +
+          '<td>' + c.sizeMB + '</td>' +
+          '<td class="' + riskClass + '">' + esc(c.risk) + '</td>' +
+          '<td>' + esc(c.note) + '</td>';
+        tbody.appendChild(ctr);
+        childRows.push(ctr);
+      }
+
+      const groupCheck = tr.querySelector('.group-check');
+      tr.addEventListener('click', (e) => {
+        if (groupCheck && e.target === groupCheck) return;
+        if (e.target.closest && e.target.closest('.path-link')) return;
+        const expanded = tr.classList.toggle('expanded');
+        for (const cr of childRows) cr.classList.toggle('hidden', !expanded);
+      });
+
+      if (groupCheck) {
+        groupCheck.addEventListener('change', () => {
+          for (const cr of childRows) {
+            const cb = cr.querySelector('.child-check');
+            if (!cb.disabled) cb.checked = groupCheck.checked;
+          }
+        });
+      }
+      for (const cr of childRows) {
+        cr.querySelector('.child-check').addEventListener('change', () => {
+          if (!groupCheck) return;
+          const checks = childRows.map(cr2 => cr2.querySelector('.child-check'));
+          const enabled = checks.filter(cb => !cb.disabled);
+          const checked = enabled.filter(cb => cb.checked).length;
+          groupCheck.checked = enabled.length > 0 && checked === enabled.length;
+          groupCheck.indeterminate = checked > 0 && checked < enabled.length;
+        });
+      }
+    }
+  }
+
+  function leafStats(gs) {
+    let count = 0, high = 0, totalSize = 0;
+    for (const g of gs) {
+      for (const c of g.children) {
+        count++;
+        if (c.risk === '高') high++;
+        totalSize += c.sizeMB;
+      }
+    }
+    return { count, high, totalSize: Math.round(totalSize * 10) / 10 };
+  }
+
+  // ===== 隐私体检 =====
+  $('p-scanBtn').addEventListener('click', async () => {
+    $('p-scanBtn').disabled = true;
+    $('p-wipeBtn').disabled = true;
+    $('p-status').textContent = '正在体检...';
+    $('p-progress').style.width = '15%';
+    $('p-tbody').innerHTML = '';
+    await new Promise(r => setTimeout(r, 50));
+
+    privacyGroups = await privacyScan();
+    renderGroups(privacyGroups, 'p-tbody');
+    const s = leafStats(privacyGroups);
+    $('p-statHigh').textContent = s.high;
+    $('p-statTotal').textContent = s.count;
+    $('p-statSize').textContent = s.totalSize + ' MB';
+    $('p-status').textContent = '体检完成: ' + s.high + ' 个高风险泄露面, 点击类别行查看明细';
+    $('p-progress').style.width = '100%';
+    $('p-scanBtn').disabled = false;
+    $('p-wipeBtn').disabled = false;
+  });
+
+  // ===== 残留检测 =====
+  $('r-scanBtn').addEventListener('click', async () => {
+    $('r-scanBtn').disabled = true;
+    $('r-wipeBtn').disabled = true;
+    $('r-status').textContent = '正在检测(需读取注册表, 可能较慢)...';
+    $('r-progress').style.width = '15%';
+    $('r-tbody').innerHTML = '';
+    await new Promise(r => setTimeout(r, 50));
+
+    const result = await residueScan();
+    residueGroups = result.groups;
+    renderGroups(residueGroups, 'r-tbody');
+    const s = leafStats(residueGroups);
+    const orphanCount = residueGroups.length > 0 ? residueGroups[0].children.length : 0;
+    $('r-statOrphan').textContent = orphanCount;
+    $('r-statTotal').textContent = s.count;
+    $('r-statSize').textContent = s.totalSize + ' MB';
+    $('r-status').textContent = '检测完成: ' + orphanCount + ' 个孤儿目录(已对比 ' + result.uninstallCount + ' 个注册表卸载项)';
+    $('r-progress').style.width = '100%';
+    $('r-scanBtn').disabled = false;
+    $('r-wipeBtn').disabled = false;
+  });
+
+  // ===== 安全清除(两个 Tab 共用逻辑) =====
+  async function doWipe(tbodyId, scanBtnId, wipeBtnId, statusId, progressId, rescan) {
+    const checked = [];
+    document.querySelectorAll('#' + tbodyId + ' .child-check').forEach(cb => {
+      if (cb.checked && cb.dataset.can === 'true') {
+        checked.push({ type: cb.dataset.type || 'dir', target: cb.dataset.path });
+      }
+    });
+    if (checked.length === 0) {
+      alert('请先勾选要清除的项目(展开类别行可细分选择)');
+      return;
+    }
+
+    // 按类型统计并警示
+    const dirCount = checked.filter(i => i.type === 'dir').length;
+    const regCount = checked.filter(i => i.type === 'registry').length;
+    const pathCount = checked.filter(i => i.type === 'path-env').length;
+    const credCount = checked.filter(i => i.type === 'credential').length;
+    let warn = '';
+    if (dirCount > 0) warn += '\n- ' + dirCount + ' 个目录/文件: 覆盖写入后删除, 不可恢复';
+    if (regCount > 0) warn += '\n- ' + regCount + ' 个注册表项: 将被删除';
+    if (pathCount > 0) warn += '\n- ' + pathCount + ' 个 PATH 条目: 将从用户级环境变量移除';
+    if (credCount > 0) warn += '\n- 凭据管理器: 全部保存的登录凭据将失效';
+
+    if (!confirm('确认清除以下 ' + checked.length + ' 个项目?' + warn + '\n\n' + checked.map(i => i.target).join('\n'))) {
+      return;
+    }
+    $(wipeBtnId).disabled = true;
+    $(scanBtnId).disabled = true;
+    $(statusId).textContent = '正在安全清除...';
+    $(progressId).style.width = '30%';
+
+    const result = await wipe(checked);
+    let msg = '清除完成: 成功 ' + result.success + ' 项, 失败 ' + result.fail + ' 项';
+    if (result.errors && result.errors.length > 0) {
+      msg += '\n\n失败详情:\n' + result.errors.join('\n');
+    }
+    $(statusId).textContent = '清除完成: 成功 ' + result.success + ' 项, 失败 ' + result.fail + ' 项';
+    $(progressId).style.width = '100%';
+    alert(msg);
+    rescan();
+  }
+
+  $('p-wipeBtn').addEventListener('click', () => doWipe('p-tbody', 'p-scanBtn', 'p-wipeBtn', 'p-status', 'p-progress', () => $('p-scanBtn').click()));
+  $('r-wipeBtn').addEventListener('click', () => doWipe('r-tbody', 'r-scanBtn', 'r-wipeBtn', 'r-status', 'r-progress', () => $('r-scanBtn').click()));
+
+  // ===== 风险报告(B: 汇总) =====
+  function renderReport() {
+    const body = $('reportBody');
+    if (!privacyGroups && !residueGroups) {
+      body.innerHTML = '<div class="empty-hint">请先在"隐私体检"和"残留检测"中完成扫描, 再查看汇总报告</div>';
+      return;
+    }
+    let html = '<h2>隐私风险报告</h2><div class="sub">生成时间: ' + new Date().toLocaleString() + '</div>';
+
+    // 评分
+    let score = 100;
+    let pHigh = 0, pCount = 0, pSize = 0;
+    let rOrphan = 0, rCount = 0, rSize = 0;
+    if (privacyGroups) {
+      const s = leafStats(privacyGroups);
+      pHigh = s.high; pCount = s.count; pSize = s.totalSize;
+      score -= pHigh * 6;
+    }
+    if (residueGroups) {
+      const s = leafStats(residueGroups);
+      rCount = s.count; rSize = s.totalSize;
+      rOrphan = residueGroups.length > 0 ? residueGroups[0].children.length : 0;
+      score -= rOrphan * 4;
+    }
+    if (score < 0) score = 0;
+    const level = score >= 70 ? 'good' : (score >= 40 ? 'mid' : 'bad');
+    const levelText = score >= 70 ? '风险较低' : (score >= 40 ? '风险中等' : '风险较高');
+    const advice = score >= 70
+      ? '隐私泄露面较小, 建议定期复查'
+      : (score >= 40
+        ? '存在明显泄露面, 建议清除高风险项后再移交设备'
+        : '泄露面较大! 换机/卖机前务必清除全部高风险项');
+
+    html += '<div class="score-box ' + level + '"><div class="score-num">' + score + '</div><div class="score-desc"><b>' + levelText + '</b><br>' + advice + '</div></div>';
+
+    if (privacyGroups) {
+      html += '<div class="report-section"><h3>隐私泄露面</h3>' +
+        '<div class="report-line"><span>高风险项(密码/凭证/聊天记录)</span><span class="val" style="color:#e74c3c">' + pHigh + '</span></div>' +
+        '<div class="report-line"><span>泄露面项目总数</span><span class="val">' + pCount + '</span></div>' +
+        '<div class="report-line"><span>涉及数据量</span><span class="val">' + pSize + ' MB</span></div></div>';
+    }
+    if (residueGroups) {
+      html += '<div class="report-section"><h3>搬家/卸载残留</h3>' +
+        '<div class="report-line"><span>孤儿目录(无注册表引用)</span><span class="val" style="color:#e74c3c">' + rOrphan + '</span></div>' +
+        '<div class="report-line"><span>残留项目总数</span><span class="val">' + rCount + '</span></div>' +
+        '<div class="report-line"><span>可释放空间</span><span class="val">' + rSize + ' MB</span></div></div>';
+    }
+    html += '<div class="report-section"><h3>建议</h3><div class="score-desc">' +
+      '1. 换机/卖机前: 清除浏览器密码/Cookie、聊天记录、SSH 密钥<br>' +
+      '2. 清除时使用"安全清除"(覆盖写入), 普通删除可被恢复<br>' +
+      '3. 孤儿目录确认无用后清除, 可释放磁盘空间</div></div>';
+
+    body.innerHTML = html;
+  }
+
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+</script>
+</body>
+</html>
