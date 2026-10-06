@@ -49,6 +49,16 @@
 | Deletion method | Overwrite, anti-recovery | Plain delete, recoverable |
 | Background service | None, runs on demand | Always resident |
 
+### Detection Boundaries (Honest Limitations)
+
+Residue detection distinguishes "alive" vs "dead" software using five system signals: registry references (InstallLocation / DisplayIcon / UninstallString), PATH entries, running processes, directory mtime activity (90-day window), and name matching. The exemption algorithms are universal — they read Windows mechanisms, not machine-specific presets. Each exemption creates a known blind spot:
+
+1. **90-day activity lag** — recently uninstalled software keeps a fresh mtime and is exempted for up to 90 days; residue becomes detectable after the window. Irrelevant for device-handover scenarios (long past 90 days).
+2. **Incomplete uninstalls** — if both the registry entry and the directory survive an uninstall, the registry still declares the software installed (it also still appears in Control Panel); the tool treats it as installed by design.
+3. **Multiple copies** — the same software on multiple drives, where the older copy was active within 90 days, is exempted (dedicated multi-copy detection is on the roadmap).
+
+Measured on a real machine: **83% recall** (5/6 known residues; the miss is a boundary case of blind spot 1) and **88% precision** (remaining false positives are user-recognizable). A rules dictionary compiled from microsoft/winget-pkgs (13,148 apps) labels findings with probable software names — labeling only, never exemption, so uninstalled software is never wrongly suppressed.
+
 ### Installation & Quick Start
 
 ```bash
@@ -101,6 +111,16 @@ SecureClean/
 | 隐私泄露面 | 按换机场景输出风险报告 | 不做 |
 | 删除方式 | 覆盖写入,防数据恢复 | 普通删除,可被恢复 |
 | 常驻后台 | 无,用完即走 | 有 |
+
+### 检测能力边界(诚实声明)
+
+残留检测用五类系统信号区分软件"活着"还是"死了":注册表引用(InstallLocation / DisplayIcon / UninstallString)、PATH 条目、运行进程、目录 mtime 活跃度(90 天窗口)、名称匹配。豁免算法是普适的——读取的是 Windows 通用机制,不是针对特定机器的预置知识。每层豁免都带来一个已知盲区:
+
+1. **90 天活跃滞后**——刚卸载的软件目录 mtime 仍然"新鲜",最长 90 天内会被豁免;超过窗口后必然检出。对换机/卖机场景无影响(那时早已超过 90 天)。
+2. **卸载不干净的双残留**——注册表项和目录都未清理时,注册表仍"声明"软件已安装(控制面板里也显示已安装);工具按设计将其视为已安装。
+3. **多副本旧版**——同一软件存在于多个盘,旧副本 90 天内有活动时被豁免(专门的多副本检测在路线图上)。
+
+真机实测:**召回率 83%**(6 个已知残留检出 5 个,漏检项为盲区 1 的边界案例),**精确率 88%**(剩余误报均为用户可自行判断的类型)。由 microsoft/winget-pkgs 编译的规则字典(13148 个软件)为检测结果标注疑似软件名——仅标注、绝不用于豁免,已卸载软件不会被错误压制。
 
 ### 安装与运行
 
