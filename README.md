@@ -136,9 +136,9 @@ npm start
 ```
 SecureClean/
 ├── app/               # Electron 应用(当前产品)
-│   ├── main.js        # 主进程: 扫描/清除逻辑 + IPC
+│   ├── main.js        # 主进程:扫描/清除逻辑 + IPC
 │   ├── preload.js     # contextBridge
-│   ├── index.html     # 渲染进程: 三 Tab 界面, 折叠分组结果
+│   ├── index.html     # 渲染进程:三 Tab 界面,折叠分组结果
 │   └── package.json
 ├── docs/              # 产品方案文档
 ├── legacy/            # 历史版本归档(PowerShell / C# WinForms)
